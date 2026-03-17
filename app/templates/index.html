@@ -1,0 +1,392 @@
+<!-- app/templates/index.html
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Agentic Web Analyzer</title>
+</head>
+
+<body>
+
+    <h2>Agentic Website Analyzer</h2>
+
+    <form method="post" action="/analyze">
+        <input type="text" name="url" placeholder="Enter website URL" value="{{ url }}" required><br><br>
+        <input type="text" name="query" placeholder="Ask: SEO / accessibility / content analysis" required><br><br>
+        <button type="submit">Analyze</button>
+    </form>
+
+    {% if result %}
+    <h3>Result:</h3>
+    <pre>{{ result }}</pre>
+    {% endif %}
+
+</body>
+
+</html> -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agentic Web Intelligence</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+  <div class="wrapper">
+
+    <header>
+      <div class="logo-block">
+        <span class="logo-tag">⬡ Agentic Intelligence</span>
+        <h1>Web <span>Analyzer</span></h1>
+      </div>
+    </header>
+
+    <div class="form-card">
+      <form method="post" action="/analyze">
+        <div class="input-row">
+          <div class="input-group">
+            <label class="form-label" for="url">Target URL</label>
+            <input type="text" id="url" name="url" placeholder="https://example.com" value="{{ url }}" required />
+          </div>
+          <div class="input-group">
+            <label class="form-label" for="query">Analysis Query</label>
+            <input type="text" id="query" name="query" placeholder="SEO / accessibility / content analysis" required />
+          </div>
+          <button type="submit" class="btn-analyze">Analyze</button>
+        </div>
+      </form>
+    </div>
+
+    {% if result %}
+    <div id="results">
+      <div class="results-header">
+        <h2>Analysis Results</h2>
+        <div class="divider-line"></div>
+      </div>
+      <div class="score-row" id="scoreRow"></div>
+      <div id="panelsContainer"></div>
+    </div>
+
+    <script>
+      const RAW = {{ result | tojson | safe }};
+      const $ = (sel, ctx = document) => ctx.querySelector(sel);
+
+      function el(tag, cls, html = '') {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (html) e.innerHTML = html;
+        return e;
+      }
+
+      const gradeClass = g => ({ A: 'grade-A', B: 'grade-B', C: 'grade-C', D: 'grade-D', F: 'grade-F' }[g] || 'grade-F');
+
+      function issueClass(t) {
+        if (!t) return 'ok';
+        const s = t.toLowerCase();
+        if (s.includes('✅') || s.includes('no major')) return 'ok';
+        if (s.includes('poor') || s.includes('missing') || s.includes('broken') || s.includes('fail') || s.includes('error')) return 'error';
+        if (s.includes('warn') || s.includes('needs') || s.includes('thin') || s.includes('short') || s.includes('long') || s.includes('duplicate')) return 'warn';
+        return 'info';
+      }
+
+      const ratingClass = r => !r || r === 'n/a' ? '' : r === 'Good' ? 'good' : r === 'Needs Improvement' ? 'warn' : 'poor';
+
+      function perfPct(metric, val) {
+        const m = { TTFB: 3, FCP: 5, LCP: 8, TBT: 1.5, DOM_Interactive: 10, Total_Load_Time: 12 };
+        return Math.min(100, (val / (m[metric] || 10)) * 100);
+      }
+
+      const kv = (key, value, cls = '') =>
+        `<div class="kv-row"><span class="kv-key">${key}</span><span class="kv-value ${cls}">${value ?? '—'}</span></div>`;
+
+      function buildIssues(issues) {
+        if (!issues?.length) return '';
+        return `<ul class="issues-list">${issues.map(i =>
+          `<li class="issue-item ${issueClass(i)}"><div class="issue-dot"></div><span>${i}</span></li>`
+        ).join('')}</ul>`;
+      }
+
+      function addScoreCard(label, score, grade, type) {
+        const c = el('div', `score-card ${type}`);
+        c.innerHTML = `<div class="score-card-label">${label}</div>
+        <div class="score-card-value">${score}</div>
+        <span class="score-card-grade ${gradeClass(grade)}">Grade ${grade}</span>`;
+        $('#scoreRow').appendChild(c);
+      }
+
+      function addPanel(icon, title, subtitle, bodyHTML, open = false) {
+        const p = el('div', `panel${open ? ' open' : ''}`);
+        p.innerHTML = `<div class="panel-header">
+        <div class="panel-title-row">
+          <div class="panel-icon">${icon}</div>
+          <div><div class="panel-title">${title}</div><div class="panel-subtitle">${subtitle}</div></div>
+        </div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="panel-body">${bodyHTML}</div>`;
+        p.querySelector('.panel-header').onclick = () => p.classList.toggle('open');
+        $('#panelsContainer').appendChild(p);
+      }
+
+      function buildSEO(d) {
+        if (!d) return;
+        if (d.error) {
+          addPanel('🔎', 'SEO Analysis', 'Error', `<div class="issue-item error"><div class="issue-dot"></div><span>${d.error}</span></div>`, true);
+          return;
+        }
+        addScoreCard('SEO Score', d.score ?? '—', d.grade ?? '?', 'seo');
+        let body = buildIssues(d.issues);
+        const det = d.details || {};
+        const perf = d.performance || {};
+
+        if (Object.keys(perf).length) {
+          let ph = `<div class="detail-block"><div class="detail-block-title">⚡ Core Web Vitals</div>`;
+          for (const [k, v] of Object.entries(perf)) {
+            if (!['FCP', 'DOM_Interactive', 'Total_Load_Time'].includes(k)) continue;
+            const val = typeof v === 'object' ? v.value : v;
+            const rating = typeof v === 'object' ? v.rating : 'n/a';
+            const rc = ratingClass(rating);
+            ph += `<div class="perf-metric">
+            <div class="perf-metric-header">
+              <span class="perf-key">${k.replace(/_/g, ' ')}</span>
+              <span class="${rc}">${val}s — ${rating}</span>
+            </div>
+            <div class="perf-bar-track"><div class="perf-bar-fill ${rc}" style="width:${perfPct(k, val)}%"></div></div>
+          </div>`;
+          }
+          ph += '</div>';
+
+          const mt = det.meta_title || {};
+          const md = det.meta_description || {};
+          const rs = det.sitemap_robots || det.robots_sitemap || {};
+
+          const hd = det.headers || {};
+          const im = det.images || {};
+
+          let hdrHtml = `<div class="detail-block"><div class="detail-block-title">Header Hierarchy</div>`;
+          ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].forEach(lvl => {
+            const count = (hd[lvl] || []).length;
+            hdrHtml += kv(lvl.toUpperCase() + ' Tags', count, lvl === 'h1' && count !== 1 ? 'poor' : 'info');
+            if (count > 0) {
+              hdrHtml += `<div style="font-size:10px; color:var(--text-muted); margin-bottom: 6px; padding-left: 10px; border-left: 2px solid var(--border); overflow-wrap: break-word; white-space: normal;">`;
+              (hd[lvl] || []).slice(0, 5).forEach(title => {
+                hdrHtml += `• ${title}<br>`;
+              });
+              if (count > 5) hdrHtml += `• <em>...and ${count - 5} more</em><br>`;
+              hdrHtml += `</div>`;
+            }
+          });
+          hdrHtml += kv('Valid Hierarchy', hd.hierarchy_valid ? 'Yes' : 'No', hd.hierarchy_valid ? 'good' : 'poor');
+          hdrHtml += `</div>`;
+
+          body += `<div class="detail-grid">${ph}
+          <div class="detail-block"><div class="detail-block-title">🏷 Meta Tags</div>
+            ${kv('Title', mt.value ? `"${mt.value.substring(0, 38)}…"` : 'Missing')}
+            ${kv('Title Length', (mt.length || 0) + ' chars', mt.status === 'Good' ? 'good' : 'warn')}
+            ${kv('Title Status', mt.status, mt.status === 'Good' ? 'good' : 'warn')}
+            ${kv('Desc Length', (md.length || 0) + ' chars', md.status === 'Good' ? 'good' : 'warn')}
+            ${kv('Desc Status', md.status, md.status === 'Good' ? 'good' : 'warn')}
+          </div>
+          <div class="detail-block"><div class="detail-block-title">Sitemap & Robots</div>
+            ${kv('sitemap.xml', rs.sitemap_xml || (rs.sitemap_found ? 'Found' : 'Not Found'), rs.sitemap_xml === 'Found' || rs.sitemap_found ? 'good' : 'poor')}
+            ${kv('robots.txt', rs.robots_txt || (rs.robots_found ? 'Found' : 'Not Found'), rs.robots_txt === 'Found' || rs.robots_found ? 'good' : 'poor')}
+            ${kv('Sitemap in Robots', rs.sitemap_in_robots ? 'Yes' : 'No', rs.sitemap_in_robots ? 'good' : 'warn')}
+          </div>
+          ${hdrHtml}
+          <div class="detail-block"><div class="detail-block-title">Image Alt Attributes</div>
+            ${kv('Total Images', im.total_images || 0)}
+            ${kv('Missing Alt', im.missing_alt || 0, (im.missing_alt || 0) === 0 ? 'good' : 'poor')}
+            ${(im.missing_srcs || []).slice(0, 2).map((src) => kv('Missing', `...${src.substring(src.length - 15)}`, 'poor')).join('')}
+          </div>
+        </div>`;
+
+          const kws = d.top_keywords || det.keywords || [];
+          if (kws.length) {
+            body += `<div class="detail-block" style="margin-top:14px"><div class="detail-block-title">Top Keywords</div>
+            <div class="keyword-list">${kws.map(k =>
+              `<div class="keyword-tag">${k.keyword}<span class="kw-density">${k.density}%</span>
+               ${k.relevance ? `<span class="kv-value ${k.relevance === 'High' ? 'good' : k.relevance === 'Medium' ? 'warn' : ''}">${k.relevance}</span>` : ''}</div>`
+            ).join('')}</div>
+          </div>`;
+          }
+        }
+
+        addPanel('🔎', 'SEO Analysis', `${d.url || ''} · Score ${d.score}/100`, body, true);
+      }
+
+      function buildAccessibility(d) {
+        if (!d) return;
+        if (d.error) {
+          addPanel('♿', 'Accessibility', 'Error', `<div class="issue-item error"><div class="issue-dot"></div><span>${d.error}</span></div>`, true);
+          return;
+        }
+        addScoreCard('Accessibility', d.score ?? '—', d.grade ?? '?', 'access');
+        let body = buildIssues(d.issues);
+        const det = d.details || {};
+        body += `<div class="detail-grid">`;
+
+        const ma = det.missing_alt || {};
+        if (Object.keys(ma).length) {
+          let rows = kv('Total Violations', ma.total_violations, ma.total_violations > 0 ? 'poor' : 'good');
+          if (ma.by_tag) for (const [t, m] of Object.entries(ma.by_tag)) rows += kv(t, m.length, m.length > 0 ? 'warn' : 'good');
+          body += `<div class="detail-block"><div class="detail-block-title">🖼 Missing Alt Text</div>${rows}</div>`;
+        }
+
+        const aria = det.aria_labels || {};
+        if (Object.keys(aria).length) body += `<div class="detail-block"><div class="detail-block-title">ARIA Labels</div>
+        ${kv('Total Interactive', aria.total_interactive)}
+        ${kv('Missing ARIA', aria.missing_aria, aria.missing_aria > 0 ? 'poor' : 'good')}
+      </div>`;
+
+        const forms = det.form_labels || {};
+        if (Object.keys(forms).length) body += `<div class="detail-block"><div class="detail-block-title">Form Labels</div>
+        ${kv('Total Inputs', forms.total_inputs)}
+        ${kv('Unlabeled', forms.unlabeled_inputs, forms.unlabeled_inputs > 0 ? 'poor' : 'good')}
+      </div>`;
+
+        const sem = det.semantic_structure || {};
+        if (sem.present || sem.missing) body += `<div class="detail-block"><div class="detail-block-title">Semantic HTML</div>
+        ${kv('Present', (sem.present || []).join(', ') || '—', 'good')}
+        ${kv('Missing', (sem.missing || []).join(', ') || 'None', sem.missing?.length ? 'warn' : 'good')}
+      </div>`;
+
+        const cc = det.color_contrast || {};
+        if (Object.keys(cc).length) body += `<div class="detail-block"><div class="detail-block-title">Color Contrast</div>
+        ${kv('Checked', cc.elements_checked)}
+        ${kv('Failures', cc.contrast_failures, cc.contrast_failures > 0 ? 'poor' : 'good')}
+        ${(cc.failures || []).slice(0, 3).map(f => kv(`${f.fg} on ${f.bg}`, `${f.ratio}:1 (${f.type})`, 'poor')).join('')}
+      </div>`;
+
+        body += '</div>';
+        addPanel('♿', 'Accessibility', `WCAG 2.1 AA · Score ${d.score}/100`, body);
+      }
+
+      function buildContent(d) {
+        if (!d) return;
+        if (d.error) {
+          addPanel('📝', 'Content Quality', 'Error', `<div class="issue-item error"><div class="issue-dot"></div><span>${d.error}</span></div>`, true);
+          return;
+        }
+        addScoreCard('Content Quality', d.score ?? '—', d.grade ?? '?', 'content');
+        let body = buildIssues(d.issues);
+        const det = d.details || {};
+        body += `<div class="detail-grid">`;
+
+        const read = det.readability || {};
+        if (Object.keys(read).length) {
+          const fs = read.flesch_reading_ease;
+          body += `<div class="detail-block"><div class="detail-block-title">📖 Readability</div>
+          ${kv('Flesch Score', fs !== null ? fs : 'N/A', fs >= 60 ? 'good' : fs >= 40 ? 'warn' : 'poor')}
+          ${kv('Grade Level', read.grade_label)}
+        </div>`;
+        }
+
+        const depth = det.content_depth || {};
+        if (Object.keys(depth).length) body += `<div class="detail-block"><div class="detail-block-title">Content Depth</div>
+        ${kv('Word Count', depth.word_count, depth.word_count >= 800 ? 'good' : depth.word_count >= 300 ? 'warn' : 'poor')}
+        ${kv('Depth', depth.depth_label)}
+        ${kv('Sentences', depth.sentence_count)}
+        ${kv('Avg Sentence', depth.avg_sentence_length + ' words', depth.avg_sentence_length <= 20 ? 'good' : 'warn')}
+        ${kv('Lexical Diversity', depth.lexical_diversity_pct + '%')}
+        ${kv('Subheadings', depth.subheadings_found, depth.subheadings_found > 0 ? 'good' : 'warn')}
+      </div>`;
+
+        const dup = det.duplicate_content || {};
+        if (Object.keys(dup).length) body += `<div class="detail-block"><div class="detail-block-title">Duplicate Content</div>
+        ${kv('Analyzed', dup.paragraphs_analyzed)}
+        ${kv('Exact Dupes', dup.exact_duplicates, dup.exact_duplicates > 0 ? 'poor' : 'good')}
+        ${kv('Near Dupes', dup.near_duplicates, dup.near_duplicates > 0 ? 'warn' : 'good')}
+      </div>`;
+
+        const bl = det.broken_links || {};
+        if (Object.keys(bl).length) body += `<div class="detail-block"><div class="detail-block-title">Links</div>
+        ${kv('Total Found', bl.total_links_found)}
+        ${kv('Checked', bl.unique_links_checked)}
+        ${kv('Broken', bl.broken_count, bl.broken_count > 0 ? 'poor' : 'good')}
+        ${(bl.broken_links || []).slice(0, 3).map(b => kv((b.url || '').substring(0, 32) + '…', b.status, 'poor')).join('')}
+      </div>`;
+
+        body += '</div>';
+        addPanel('📝', 'Content Quality', `Readability · Depth · Links · Score ${d.score}/100`, body);
+      }
+
+      function buildDB(d) {
+        if (!d) return;
+        addScoreCard('DB Operation', d.status === 'success' ? '✓' : '✗', d.status === 'success' ? 'A' : 'F', 'db');
+        let body = `<div class="detail-grid"><div class="detail-block" style="grid-column:1/-1">
+        <div class="detail-block-title">Operation Summary</div>
+        ${kv('Operation', d.operation, 'info')}
+        ${kv('Table', d.table)}
+        ${kv('Status', d.status, d.status === 'success' ? 'good' : 'poor')}
+        ${kv('Rows', d.row_count ?? '—')}
+        ${d.error ? kv('Error', d.error, 'poor') : ''}
+      </div></div>`;
+
+        if (d.operation === 'SELECT' && Array.isArray(d.result) && d.result.length) {
+          const cols = Object.keys(d.result[0]);
+          body += `<div class="db-table-wrap"><table>
+          <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+          <tbody>${d.result.map(row => `<tr>${cols.map(c => `<td title="${row[c]}">${row[c] ?? '—'}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table></div>`;
+        } else if (typeof d.result === 'string') {
+          body += `<div class="issue-item ok" style="margin-top:10px"><div class="issue-dot"></div><span>${d.result}</span></div>`;
+        }
+
+        addPanel('🗄', 'Database Operation', `${d.operation || 'Query'} on ${d.table || 'database'}`, body);
+      }
+
+      function render(raw) {
+        let parsed = null;
+        if (typeof raw === 'object' && raw !== null) parsed = raw;
+        else if (typeof raw === 'string') { try { parsed = JSON.parse(raw); } catch (_) { } }
+
+        if (!parsed) {
+          addPanel('📄', 'Result', 'Raw Output', `<pre class="raw-result">${String(raw)}</pre>`, true);
+          return;
+        }
+
+        if (parsed.type) { dispatch(parsed); return; }
+
+        const keys = ['seo_result', 'accessibility_result', 'content_result', 'db_result'];
+        if (keys.some(k => k in parsed)) {
+          buildSEO(parsed.seo_result);
+          buildAccessibility(parsed.accessibility_result);
+          buildContent(parsed.content_result);
+          buildDB(parsed.db_result);
+          return;
+        }
+
+        addPanel('📄', 'Result', 'Raw Output', `<pre class="raw-result">${JSON.stringify(parsed, null, 2)}</pre>`, true);
+      }
+
+      function dispatch(d) {
+        const t = (d.type || '').toLowerCase();
+        if (t.includes('seo')) buildSEO(d);
+        else if (t.includes('access')) buildAccessibility(d);
+        else if (t.includes('content')) buildContent(d);
+        else if (t.includes('database')) buildDB(d);
+        else addPanel('📄', d.type || 'Result', '', `<pre class="raw-result">${JSON.stringify(d, null, 2)}</pre>`, true);
+      }
+
+      render(RAW);
+      if (!$('#scoreRow').children.length) $('#scoreRow').style.display = 'none';
+    </script>
+
+    {% else %}
+    <div class="empty-state">
+      <div class="big">☕</div>
+      Enter a URL and your query above to begin analysis.
+    </div>
+    {% endif %}
+
+  </div>
+</body>
+
+</html>
